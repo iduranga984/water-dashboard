@@ -47,6 +47,8 @@
   <div class="data-box">📏 Distance: <span id="distance">--</span> cm</div>
   <div class="data-box">💧 Water Level: <span id="level">--</span> %</div>
   <div class="data-box">📈 Fill Rate: <span id="rate">--</span> cm/min</div>
+  <div class="data-box">🌡 Temperature: <span id="temperature">--</span> °C</div>
+  <div class="data-box">⚙️ Water Pump Status: <span id="pump">--</span></div>
 
   <div id="tank">
     <div id="water" style="height: 0%"></div>
@@ -55,13 +57,9 @@
   <canvas id="levelChart"></canvas>
 
   <script>
-    const MAX_HEIGHT_CM = 100; // Adjust this to your tank height
-    const topic = "distance";
-
-    let lastDistance = null;
-    let lastTime = null;
-
+    const MAX_HEIGHT_CM = 100; // Set your actual tank height here
     const ctx = document.getElementById("levelChart").getContext("2d");
+
     const chart = new Chart(ctx, {
       type: 'line',
       data: {
@@ -87,42 +85,58 @@
 
     client.on("connect", () => {
       console.log("✅ MQTT Connected");
-      client.subscribe(topic);
+      client.subscribe("distance");
+      client.subscribe("temperature");     // 🆕 Subscribe to temp
+      client.subscribe("pumpStatus");      // Already added
     });
 
-    client.on("message", (t, msg) => {
-      const distance = parseFloat(msg.toString());
-      const now = new Date().getTime();
+    let lastDistance = null;
+    let lastTime = null;
 
-      const levelPercent = Math.min(100, Math.max(0, ((MAX_HEIGHT_CM - distance) / MAX_HEIGHT_CM) * 100));
+    client.on("message", (topic, msg) => {
+      const message = msg.toString();
 
-      // Calculate fill rate (cm/min)
-      let rate = "--";
-      if (lastDistance !== null && lastTime !== null) {
-        const deltaTime = (now - lastTime) / 60000; // in minutes
-        const deltaDist = lastDistance - distance;
-        rate = (deltaDist / deltaTime).toFixed(2);
+      if (topic === "distance") {
+        const distance = parseFloat(message);
+        const now = new Date().getTime();
+        const levelPercent = Math.min(100, Math.max(0, ((MAX_HEIGHT_CM - distance) / MAX_HEIGHT_CM) * 100));
+
+        // Fill rate
+        let rate = "--";
+        if (lastDistance !== null && lastTime !== null) {
+          const deltaTime = (now - lastTime) / 60000;
+          const deltaDist = lastDistance - distance;
+          rate = (deltaDist / deltaTime).toFixed(2);
+        }
+
+        lastDistance = distance;
+        lastTime = now;
+
+        // Update UI
+        document.getElementById("distance").innerText = distance.toFixed(2);
+        document.getElementById("level").innerText = levelPercent.toFixed(1);
+        document.getElementById("rate").innerText = isNaN(rate) ? "--" : rate;
+        document.getElementById("water").style.height = `${levelPercent}%`;
+
+        // Chart
+        const timeLabel = new Date().toLocaleTimeString();
+        chart.data.labels.push(timeLabel);
+        chart.data.datasets[0].data.push(levelPercent);
+        if (chart.data.labels.length > 20) {
+          chart.data.labels.shift();
+          chart.data.datasets[0].data.shift();
+        }
+        chart.update();
       }
 
-      lastDistance = distance;
-      lastTime = now;
-
-      // Update UI
-      document.getElementById("distance").innerText = distance.toFixed(2);
-      document.getElementById("level").innerText = levelPercent.toFixed(1);
-      document.getElementById("rate").innerText = isNaN(rate) ? "--" : rate;
-
-      document.getElementById("water").style.height = `${levelPercent}%`;
-
-      // Update chart
-      const timeLabel = new Date().toLocaleTimeString();
-      chart.data.labels.push(timeLabel);
-      chart.data.datasets[0].data.push(levelPercent);
-      if (chart.data.labels.length > 20) {
-        chart.data.labels.shift();
-        chart.data.datasets[0].data.shift();
+      if (topic === "temperature") {
+        document.getElementById("temperature").innerText = parseFloat(message).toFixed(2);
       }
-      chart.update();
+
+      if (topic === "pumpStatus") {
+        const pumpText = message === "ON" ? "ON 🔵" : "OFF ⚪";
+        document.getElementById("pump").innerText = pumpText;
+      }
     });
   </script>
 
